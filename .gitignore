@@ -3,6 +3,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# VS Code settings
+.vscode/
+
+# Data files (important for your project)
+*.xlsx
+*.xls
+*.csv
+
+# Environment variables (VERY important for PostgreSQL)
+.env
+
 # C extensions
 *.so
 
