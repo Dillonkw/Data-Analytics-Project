@@ -1,156 +1,226 @@
 #%%
-#Load pandas and numpy libraries
+# ============================================
+# Online Retail - Data Cleaning Pipeline
+# ============================================
+
 import pandas as pd
 import numpy as np
+
 #%%
-#Loading in the data
-file = "online_retail_II.xlsx" 
+# ============================================
+# 1. Helper function for validation
+# ============================================
+def validate_df(df, name="Dataset"):
+    """
+    Print a quick validation summary for the dataframe.
+    Useful for checking the impact of each cleaning step.
+    """
+    print(f"\n--- {name} ---")
+    print("Shape:", df.shape)
+    print("\nMissing values:")
+    print(df.isnull().sum())
+    print("\nDuplicate rows:", df.duplicated().sum())
+    print("Negative quantities:", (df["quantity"] < 0).sum())
+    print("Negative prices:", (df["price"] < 0).sum())
+    print("Unique invoices:", df["invoice_number"].nunique())
+
+#%%
+# ============================================
+# 2. Load and combine the raw Excel sheets
+# ============================================
+file = "online_retail_II.xlsx"
 
 df1 = pd.read_excel(file, sheet_name=0)
 df2 = pd.read_excel(file, sheet_name=1)
 
+# Combine both sheets into one dataset
 df = pd.concat([df1, df2], ignore_index=True)
 
+## Initial inspection of the combined raw dataset
 print("Combined shape:", df.shape)
 print(df.head())
 
+
 # %%
-### Renaming column names ###
+# ============================================
+# 3. Rename columns
+# ============================================
+# Rename columns to snake_case for consistency and SQL compatibility
 df = df.rename(columns={
-    'Invoice' : 'invoice_number',
-    'StockCode': 'product_code',
-    'Description' : 'product_description',
-    'Quantity' : 'quantity',
-    'InvoiceDate': 'invoice_date',
-    'Price' : 'price',
-    'Customer ID': 'customer_id',
-    'Country' : 'country'
+    "Invoice": "invoice_number",
+    "StockCode": "product_code",
+    "Description": "product_description",
+    "Quantity": "quantity",
+    "InvoiceDate": "invoice_date",
+    "Price": "price",
+    "Customer ID": "customer_id",
+    "Country": "country"
 })
-df.columns
-
-
-
 
 #%%
-# General data quality checks
-df.info()
-display(df.describe())
-display(df.isnull().sum())
-display(df.duplicated().sum())
+# ============================================
+# 4. Validate raw structure after renaming
+# ============================================
+validate_df(df, "Raw Data")
+#%%
+# ============================================
+# 5. Fix data types
+# ============================================
+# Convert columns to appropriate types for cleaning and analysis
+df["invoice_number"] = df["invoice_number"].astype("string")
+df["product_code"] = df["product_code"].astype("string")
+df["product_description"] = df["product_description"].astype("string")
+df["country"] = df["country"].astype("string")
+df["invoice_date"] = pd.to_datetime(df["invoice_date"])
+df["customer_id"] = df["customer_id"].astype("Int64")
 
+validate_df(df, "After Type Fixes")
+print("\nData types:")
+print(df.dtypes)
+#%%
+# ============================================
+# 6. Standardize text formatting
+# ============================================
+# Remove extra spaces and standardize case for text fields
+df["invoice_number"] = df["invoice_number"].str.strip().str.upper()
+df["product_code"] = df["product_code"].str.strip().str.upper()
+df["product_description"] = df["product_description"].str.strip()
+df["country"] = df["country"].str.strip()
 
-
-
-
+# Quick checks after formatting cleanup
+print("\nEmpty descriptions:", df["product_description"].str.strip().eq("").sum())
+print("Unique countries:", df["country"].nunique())
 
 #%%
-### Cleaning for invoice_number column ###
-#Convert to string 
-df['invoice_number'] = df['invoice_number'].astype(str)
+# ============================================
+# 7. Remove exact duplicate rows
+# ============================================
+before_rows = len(df)
 
-#Remove White Spaces
-df['invoice_number'] = df['invoice_number'].str.strip()
+#Inspect duplicates before removing them
+df[df.duplicated()]
 
-#Standardize case
-df['invoice_number'] = df['invoice_number'].str.upper()
+#%%
+df = df.drop_duplicates()
 
-#%% 
-### Feature engineering for invoice_number column ###
-#Cancelation flag
-df['is_cancelled'] = df['invoice_number'].str.startswith('C')
+after_rows = len(df)
+print(f"\nRemoved {before_rows - after_rows} duplicate rows")
 
-#Adjustment flag 
-df['is_adjustment'] = df['invoice_number'].str.startswith('A')
+validate_df(df, "After Deduplication")
 
-#Extract numeric invoice id (for grouping)
-df['invoice_id'] = df['invoice_number'].str.replace('[^0-9]', '', regex=True)
+#%%
+# ============================================
+# 8. Engineer invoice-related features
+# ============================================
+# Identify cancellations and adjustments from invoice number prefixes
+df["is_cancelled"] = df["invoice_number"].str.startswith("C")
+df["is_adjustment"] = df["invoice_number"].str.startswith("A")
 
-#Transaction type column
-df['transaction_type'] = np.where(
-    df['invoice_number'].str.startswith('C'), 'Cancelled',
-    np.where(df['invoice_number'].str.startswith('A'), 'Adjustment', 'Purchase')
+# Extract numeric invoice ID for grouping transactions together
+df["invoice_id"] = df["invoice_number"].str.replace(r"[^0-9]", "", regex=True)
+
+# Classify transaction type
+df["transaction_type"] = np.where(
+    df["is_cancelled"], "Cancelled",
+    np.where(df["is_adjustment"], "Adjustment", "Purchase")
 )
 
-df.head(10)
-#%%
-### Data validation checks ###
-#Validity check
-df[~df['invoice_number'].str.match(r'^[CA]?\d{6}$')]
-#%%
-#Missing or null after cleaning 
-df['invoice_number'].isnull().sum()
-#%%
-#Uniqueness
-print(df['invoice_number'].nunique())
-#Distribution oif transaction types
-print(df['transaction_type'].value_counts())
-
---------------------------------------------------------------
-#%%
-### Cleaning for product_code column ###
-#Convert to string 
-df['product_code'] = df['product_code'].astype(str)
-
-#Remove White Spaces
-df['product_code'] = df['product_code'].str.strip()
-
-#Standardize case
-df['product_code'] = df['product_code'].str.upper()
+print("\nTransaction type counts:")
+print(df["transaction_type"].value_counts())
+print("Cancelled rows:", df["is_cancelled"].sum())
 
 #%%
-### Feature engineering for product_code column ###
-#Extract base product code (product code with out varient)
-df['base_stockcode'] = df['product_code'].str.extract(r'(\d+)')
+# ============================================
+# 9. Engineer product-related features
+# ============================================
+# Extract numeric base product code
+df["base_product_code"] = df["product_code"].str.extract(r"^(\d+)")
 
-#Extract varient letter
-df['product_variant'] = df['product_code'].str.extract(r'([A-Z]+)$')
+# Extract letter suffix for product variants
+df["product_variant"] = df["product_code"].str.extract(r"([A-Z]+)$")
 
-#Clean product_id
-df['product_id'] = df['base_stockcode']
+# Flag valid product codes: digits followed by optional letters
+df["is_valid_product"] = df["product_code"].str.match(r"^\d+[A-Z]*$", na=False)
 
-#Product type flag
-df['has_variant'] = df['product_variant'].notnull()
-
-#Non product product codes
-#identify them
-df[~df['product_code'].str.match(r'^\d+')]
-
-#Create two dataframes. One with only product codes and one with non product codes
-products_df = df[df['product_code'].str.match(r'^\d+[A-Z]+$')]
-non_products_df = df[~df['product_code'].str.match(r'^\d+[A-Z]+$')]
-
-products_df.head(10)
+print("\nInvalid product codes:", (~df["is_valid_product"]).sum())
+print(df.loc[~df["is_valid_product"], "product_description"].value_counts().head())
 
 #%%
-#Data validation check for products_df
-#Format check
-products_df['product_code'].str.match(r'^\d+[A-Z]+$').value_counts()
-#%%
-#See if invalid rows exist
-products_df[~products_df['product_code'].str.match(r'^\d+[A-Z]+$')]
+# ============================================
+# 10. Clean and fill product descriptions
+# ============================================
+# Fill missing product descriptions using the most common description
+# associated with each product_code
+desc_map = (
+    df.dropna(subset=["product_description"])
+      .groupby("product_code")["product_description"]
+      .agg(lambda x: x.mode()[0])
+)
+
+df["product_description"] = df["product_description"].fillna(
+    df["product_code"].map(desc_map)
+)
+
+# Fill any remaining missing descriptions with a placeholder
+df["product_description"] = df["product_description"].fillna("UNKNOWN_PRODUCT")
+
+# Collapse multiple internal spaces into a single space
+df["product_description"] = df["product_description"].str.replace(r"\s+", " ", regex=True)
+
+print("\nMissing descriptions:", df["product_description"].isnull().sum())
 
 #%%
-#Check for missing values
-products_df['product_code'].isnull().sum()
+# ============================================
+# 11. Standardize country names
+# ============================================
+# Clean country labels for consistency in later analysis and dashboarding
+df["country"] = df["country"].replace({
+    "EIRE": "Ireland",
+    "USA": "United States",
+    "RSA": "South Africa",
+    "Korea": "South Korea"
+})
+
+print("\nCountry value counts:")
+print(df["country"].value_counts(dropna=False))
 
 #%%
-#Split integrity check
-len(products_df) + len(non_products_df) == len(df)
+# ============================================
+# 12. Calculate revenue
+# ============================================
+# Revenue is quantity multiplied by unit price
+df["revenue"] = df["quantity"] * df["price"]
 
-
-
-
-
-
-#%%
-df.duplicated().sum()
-
-#%%
-df_dup = df[df.duplicated(keep=False)]
-df_dup
+print("\nRevenue summary:")
+print(df["revenue"].describe())
+print("Negative revenue rows:", (df["revenue"] < 0).sum())
 
 #%%
-df_dup.sort_values(['Invoice', 'StockCode']).head(20)
+# ============================================
+# 13. Final validation
+# ============================================
+validate_df(df, "Final Cleaned Data")
 
+# Final integrity checks
+assert df["invoice_number"].notna().all(), "Missing invoice numbers found"
+assert df["invoice_date"].notna().all(), "Missing invoice dates found"
+assert df["price"].notna().all(), "Missing prices found"
+assert df.duplicated().sum() == 0, "Duplicate rows still exist"
 #%%
-df[df.duplicated()].head(20)
+# ============================================
+# 14. Key findings
+# ============================================
+print("\n--- Key Findings ---")
+print("Final row count:", len(df))
+print("Rows removed as duplicates:", before_rows - after_rows)
+print("Invalid product codes:", (~df["is_valid_product"]).sum())
+print("Negative quantity rows:", (df["quantity"] < 0).sum())
+print("Negative price rows:", (df["price"] < 0).sum())
+print("Cancelled rows:", df["is_cancelled"].sum())
+print("Adjustment rows:", df["is_adjustment"].sum())
+print("Missing customer IDs:", df["customer_id"].isna().sum())
+# %%
+# ============================================
+# 15. Save to CSV 
+# ============================================
+df.to_csv("retail_cleaned.csv", index=False)
