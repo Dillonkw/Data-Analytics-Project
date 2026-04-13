@@ -147,33 +147,29 @@ print(df.loc[~df["is_valid_product"], "product_description"].value_counts().head
 
 #%%
 # ============================================
-# 10. Clean and fill product descriptions
+# 10. Standardize product descriptions
 # ============================================
-# Fill missing product descriptions using the most common description
-# associated with each product_code
+# Create mapping: product_code = most common description
 desc_map = (
-    df.dropna(subset=["product_description"])
-      .groupby("product_code")["product_description"]
+    df.dropna(subset=['product_description'])
+      .groupby('product_code')['product_description']
       .agg(lambda x: x.mode()[0])
 )
 
-df["product_description"] = df["product_description"].fillna(
-    df["product_code"].map(desc_map)
-)
+# Apply mapping to make descriptions consistent
+df['product_description'] = df['product_code'].map(desc_map).fillna('UNKNOWN_PRODUCT')
 
-# Fill any remaining missing descriptions with a placeholder
-df["product_description"] = df["product_description"].fillna("UNKNOWN_PRODUCT")
+# Clean extra spaces
+df['product_description'] = df['product_description'].str.replace(r'\s+', ' ', regex=True).str.strip()
 
-# Collapse multiple internal spaces into a single space
-df["product_description"] = df["product_description"].str.replace(r"\s+", " ", regex=True)
-
-print("\nMissing descriptions:", df["product_description"].isnull().sum())
+# Check for any missing values
+print("\nMissing descriptions:", df['product_description'].isnull().sum())
 
 #%%
 # ============================================
 # 11. Standardize country names
 # ============================================
-# Clean country labels for consistency in later analysis and dashboarding
+# Clean country labels for consistency 
 df["country"] = df["country"].replace({
     "EIRE": "Ireland",
     "USA": "United States",
@@ -189,7 +185,7 @@ print(df["country"].value_counts(dropna=False))
 # 12. Calculate revenue
 # ============================================
 # Revenue is quantity multiplied by unit price
-df["revenue"] = df["quantity"] * df["price"]
+df['revenue'] = (df['quantity'] * df['price']).round(2)
 
 print("\nRevenue summary:")
 print(df["revenue"].describe())
@@ -197,7 +193,17 @@ print("Negative revenue rows:", (df["revenue"] < 0).sum())
 
 #%%
 # ============================================
-# 13. Final validation
+# 13. Remove duplicates created by standardization
+# ============================================
+before_rows = len(df)
+df = df.drop_duplicates()
+after_rows = len(df)
+
+print(f"\nRemoved {before_rows - after_rows} duplicates after final standardization")
+
+#%%
+# ============================================
+# 14. Final validation
 # ============================================
 validate_df(df, "Final Cleaned Data")
 
@@ -208,7 +214,7 @@ assert df["price"].notna().all(), "Missing prices found"
 assert df.duplicated().sum() == 0, "Duplicate rows still exist"
 #%%
 # ============================================
-# 14. Key findings
+# 15. Key findings
 # ============================================
 print("\n--- Key Findings ---")
 print("Final row count:", len(df))
@@ -221,6 +227,26 @@ print("Adjustment rows:", df["is_adjustment"].sum())
 print("Missing customer IDs:", df["customer_id"].isna().sum())
 # %%
 # ============================================
-# 15. Save to CSV 
+# 16. Save to CSV 
 # ============================================
-df.to_csv("retail_cleaned.csv", index=False)
+export_cols = [
+    'invoice_number',
+    'product_code',
+    'product_description',
+    'quantity',
+    'invoice_date',
+    'price',
+    'customer_id',
+    'country',
+    'is_cancelled',
+    'is_adjustment',
+    'invoice_id',
+    'transaction_type',
+    'base_product_code',
+    'product_variant',
+    'is_valid_product',
+    'revenue'
+]
+df[export_cols].to_csv("retail_cleaned.csv", index=False)
+
+# %%
