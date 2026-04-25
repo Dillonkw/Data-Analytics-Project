@@ -107,7 +107,7 @@ SELECT
 FROM scored;
 
 -- =========================================================
--- Create Customer Segments
+-- Create Detailed Customer Segments
 -- =========================================================
 -- Segment logic can be adjusted
 CREATE OR REPLACE VIEW vw_customer_segments AS
@@ -134,9 +134,71 @@ FROM vw_customer_rfm_scores;
 
 
 -- =========================================================
+-- Enhanced RFM With Customer Type
+-- =========================================================
+-- Requires:
+-- vw_customer_type
+
+-- This connects RFM strategy to the wholesale vs retail
+-- customer classification built in the customer analysis layer.
+-- =========================================================
+CREATE OR REPLACE VIEW vw_rfm_enhanced AS
+SELECT
+    s.customer_id,
+    t.customer_type,
+    s.recency,
+    s.frequency,
+    s.monetary,
+    s.r_score,
+    s.f_score,
+    s.m_score,
+    s.rfm_score,
+    s.customer_segment
+FROM vw_customer_segments s
+LEFT JOIN vw_customer_type t
+    ON s.customer_id = t.customer_id;
+
+-- =========================================================
+-- Strategic RFM Segment Grouping
+-- =========================================================
+-- Purpose:
+-- Simplify RFM segments into groups for shareholders
+
+-- Grouping logic:
+-- High Value = best existing customers
+-- Growth Opportunity = newer or developing customers
+-- At Risk = retention priority
+-- Lost = win-back / deprioritize depending on value
+-- =========================================================
+CREATE OR REPLACE VIEW vw_rfm_segment_groups AS
+SELECT
+    customer_id,
+    customer_type,
+    recency,
+    frequency,
+    monetary,
+    r_score,
+    f_score,
+    m_score,
+    rfm_score,
+    customer_segment,
+    CASE
+        WHEN customer_segment IN ('Champions', 'Loyal Customers')
+            THEN 'High Value'
+        WHEN customer_segment IN ('Potential Loyalists', 'Recent Customers')
+            THEN 'Growth Opportunity'
+        WHEN customer_segment IN ('At Risk', 'Cannot Lose Them', 'Needs Attention')
+            THEN 'At Risk'
+        WHEN customer_segment = 'Lost'
+            THEN 'Lost'
+        ELSE 'Other'
+    END AS segment_group
+FROM vw_rfm_enhanced;
+
+-- =========================================================
 -- Core RFM KPI Queries
 -- =========================================================
--- Distribution of Customers in Each Segment
+-- Distribution of Customers in Each Detailed Segment
 SELECT
     customer_segment,
     COUNT(*) AS customer_count
@@ -145,18 +207,17 @@ GROUP BY customer_segment
 ORDER BY customer_count DESC;
 
 
--- Revenue by Segment
+-- Revenue by Detailed Segment
 SELECT
     customer_segment,
     COUNT(*) AS customer_count,
-    SUM(monetary) AS total_revenue,
-    AVG(monetary) AS avg_revenue_per_customer
+    SUM(monetary) AS total_revenue
 FROM vw_customer_segments
 GROUP BY customer_segment
 ORDER BY total_revenue DESC;
 
 
--- Customers by Segment Percentage
+-- Customers by Detailed Segment Percentage
 SELECT
     customer_segment,
     COUNT(*) AS customer_count,
@@ -167,7 +228,7 @@ GROUP BY customer_segment
 ORDER BY pct_of_customers DESC;
 
 
--- Revenue by Segment Percentage
+-- Revenue by Detailed Segment Percentage
 SELECT
     customer_segment,
     SUM(monetary) AS total_revenue,
@@ -179,114 +240,125 @@ ORDER BY pct_of_total_revenue DESC;
 
 
 -- =========================================================
--- Segment Profile Analysis
+-- Enhanced RFM Analysis by Customer Type
 -- =========================================================
--- Average RFM Values by Segment
+-- Segment Distribution by Customer Type
 SELECT
     customer_segment,
+    customer_type,
+    COUNT(*) AS customer_count
+FROM vw_rfm_enhanced
+GROUP BY customer_segment, customer_type
+ORDER BY customer_segment, customer_count DESC;
+
+
+-- Revenue by Segment and Customer Type
+SELECT
+    customer_segment,
+    customer_type,
+    COUNT(*) AS customers,
+    SUM(monetary) AS total_revenue,
+    ROUND(AVG(monetary), 2) AS avg_revenue_per_customer,
+    ROUND(100.0 * SUM(monetary) / SUM(SUM(monetary)) OVER (), 2
+    ) AS pct_total_revenue
+FROM vw_rfm_enhanced
+GROUP BY customer_segment, customer_type
+ORDER BY total_revenue DESC;
+
+
+-- Average Segment Profile by Customer Type
+SELECT
+    customer_segment,
+    customer_type,
+    ROUND(AVG(monetary), 2) AS avg_revenue,
+    ROUND(AVG(frequency), 2) AS avg_frequency,
+    ROUND(AVG(recency), 2) AS avg_recency
+FROM vw_rfm_enhanced
+GROUP BY customer_segment, customer_type
+ORDER BY avg_revenue DESC;
+
+
+-- Top At-Risk High-Value Customers
+SELECT
+    customer_id,
+    customer_type,
+    customer_segment,
+    monetary,
+    frequency,
+    recency
+FROM vw_rfm_enhanced
+WHERE customer_segment IN ('At Risk', 'Cannot Lose Them')
+ORDER BY monetary DESC
+LIMIT 20;
+
+
+-- =========================================================
+-- Strategic Segment Group Queries
+-- =========================================================
+-- Strategic Group Distribution
+SELECT
+    segment_group,
+    COUNT(*) AS customer_count,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_customers
+FROM vw_rfm_segment_groups
+GROUP BY segment_group
+ORDER BY customer_count DESC;
+
+
+-- Strategic Group Revenue Summary
+SELECT
+    segment_group,
+    COUNT(*) AS customers,
+    SUM(monetary) AS total_revenue,
+    ROUND(AVG(monetary), 2) AS avg_revenue_per_customer,
+    ROUND(100.0 * SUM(monetary) / SUM(SUM(monetary)) OVER (), 2) AS pct_of_revenue
+FROM vw_rfm_segment_groups
+GROUP BY segment_group
+ORDER BY total_revenue DESC;
+
+
+-- Strategic Group by Customer Type
+SELECT
+    segment_group,
+    customer_type,
+    COUNT(*) AS customers,
+    SUM(monetary) AS revenue,
+    ROUND(AVG(monetary), 2) AS avg_revenue_per_customer,
+    ROUND(100.0 * SUM(monetary) / SUM(SUM(monetary)) OVER (), 2
+    ) AS pct_total_revenue
+FROM vw_rfm_segment_groups
+GROUP BY segment_group, customer_type
+ORDER BY revenue DESC;
+
+
+-- Strategic group profile
+SELECT
+    segment_group,
+    customer_type,
     ROUND(AVG(recency), 2) AS avg_recency,
     ROUND(AVG(frequency), 2) AS avg_frequency,
     ROUND(AVG(monetary), 2) AS avg_monetary
-FROM vw_customer_segments
-GROUP BY customer_segment
+FROM vw_rfm_segment_groups
+GROUP BY segment_group, customer_type
 ORDER BY avg_monetary DESC;
 
 
--- Top 10 customers in each Segment by Revenue
-SELECT
-	customer_segment,
-	customer_id,
-	monetary,
-	frequency,
-	recency
-FROM(
-	SELECT
-		customer_segment,
-		customer_id,
-		monetary,
-		frequency,
-		recency,
-		ROW_NUMBER() OVER(
-						PARTITION BY customer_segment
-						ORDER BY monetary DESC
-						) AS rn
-	FROM vw_customer_segments
-)t
-WHERE rn <= 10
-ORDER BY customer_segment, monetary DESC
-
-
 -- =========================================================
--- Segment Level Operational Queries
--- =========================================================
--- Champion
-SELECT *
-FROM vw_customer_segments
-WHERE customer_segment = 'Champions'
-ORDER BY monetary DESC;
-
-
--- Loyal Customers
-SELECT *
-FROM vw_customer_segments
-WHERE customer_segment = 'Loyal Customers'
-ORDER BY frequency DESC, monetary DESC;
-
-
--- Cannot Lose Them
-SELECT *
-FROM vw_customer_segments
-WHERE customer_segment = 'Cannot Lose Them'
-ORDER BY monetary DESC;
-
-
--- At Risk
-SELECT *
-FROM vw_customer_segments
-WHERE customer_segment = 'At Risk'
-ORDER BY recency DESC, monetary DESC;
-
-
--- =========================================================
--- Country Level Segmentation
+-- Strategic Action Strategy
 -- =========================================================
 SELECT
-    b.country,
-    s.customer_segment,
-    COUNT(*) AS customer_count,
-    SUM(s.monetary) AS segment_revenue
-FROM vw_customer_segments s
-JOIN (
-    SELECT DISTINCT customer_id, country
-    FROM vw_rfm_base
-	) b
-ON s.customer_id = b.customer_id
-GROUP BY b.country, s.customer_segment
-ORDER BY b.country, segment_revenue DESC;
+    segment_group,
+    customer_type,
+    COUNT(*) AS customers,
+    SUM(monetary) AS revenue,
+    CASE
+        WHEN segment_group = 'High Value' THEN 'Reward, retain, and upsell'
+        WHEN segment_group = 'Growth Opportunity' THEN 'Nurture and convert to loyal'
+        WHEN segment_group = 'At Risk' THEN 'Target with retention campaigns'
+        WHEN segment_group = 'Lost' THEN 'Test win-back selectively'
+        ELSE 'Monitor'
+    END AS strategy
+FROM vw_rfm_segment_groups
+GROUP BY segment_group, customer_type
+ORDER BY revenue DESC;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  

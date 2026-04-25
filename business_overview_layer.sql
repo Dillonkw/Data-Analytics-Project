@@ -48,6 +48,23 @@ WHERE is_cancelled = FALSE
 
 
 -- =========================================================
+-- Bulk Order View
+-- =========================================================
+CREATE OR REPLACE VIEW vw_business_transactions_enhanced AS
+SELECT
+    *,
+    CASE 
+        WHEN quantity >= 50 THEN 'Bulk Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    CASE 
+        WHEN customer_id IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END AS customer_type
+FROM vw_business_transactions;
+
+
+-- =========================================================
 -- Core KPI Queries
 -- =========================================================
 -- Sales Revenue
@@ -72,7 +89,7 @@ WHERE customer_id IS NOT NULL;
 -- Average Order Value
 SELECT
 	SUM(revenue) / COUNT(DISTINCT invoice_id) AS average_order_value
-FROM vw_business_transactions
+FROM vw_business_transactions;
 
 
 -- Median Order Value
@@ -109,6 +126,78 @@ WHERE is_cancelled = TRUE;
 
 
 -- =========================================================
+-- KPI Breakdown
+-- =========================================================
+-- Revenue Split: Bulk vs Regular
+WITH order_totals AS (
+    SELECT
+        invoice_id,
+        SUM(quantity) AS total_quantity,
+        SUM(revenue) AS order_value
+    FROM vw_business_transactions
+    GROUP BY invoice_id
+)
+SELECT
+    CASE 
+        WHEN total_quantity >= 50 THEN 'Bulk Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    COUNT(*) AS total_orders,
+    SUM(order_value) AS total_revenue,
+    ROUND(AVG(order_value), 2) AS avg_order_value
+FROM order_totals
+GROUP BY order_type
+ORDER BY total_revenue DESC;
+
+
+-- Known vs Unknown Customer Distribution
+SELECT
+    CASE 
+        WHEN customer_id IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END AS customer_type,
+    COUNT(DISTINCT invoice_id) AS total_orders,
+    SUM(revenue) AS total_revenue,
+    ROUND(AVG(revenue), 2) AS avg_transaction_value
+FROM vw_business_transactions
+GROUP BY customer_type;
+
+
+-- AOV Distortion Check
+WITH order_totals AS (
+    SELECT
+        invoice_id,
+        SUM(quantity) AS total_quantity,
+        SUM(revenue) AS order_value
+    FROM vw_business_transactions
+    GROUP BY invoice_id
+)
+SELECT
+    CASE 
+        WHEN total_quantity >= 50 THEN 'Bulk Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    ROUND(AVG(order_value), 2) AS avg_order_value
+FROM order_totals
+GROUP BY order_type;
+
+
+-- Percent of Revenue from Bulk Orders
+WITH order_totals AS (
+    SELECT
+        invoice_id,
+        SUM(quantity) AS total_quantity,
+        SUM(revenue) AS order_value
+    FROM vw_business_transactions
+    GROUP BY invoice_id
+)
+SELECT
+    ROUND(100.0 * SUM(CASE WHEN total_quantity >= 50 THEN order_value END) / 
+	SUM(order_value), 2) AS pct_revenue_bulk_orders
+FROM order_totals;
+
+
+-- =========================================================
 -- Time-Based Performance Queries
 -- =========================================================
 -- Monthly Revenue Trend
@@ -138,26 +227,6 @@ GROUP BY year
 ORDER BY year;
 
 
--- Monthly Growth Rate
-WITH monthly_revenue AS (
-    SELECT
-        DATE_TRUNC('month', invoice_date) AS month,
-        SUM(revenue) AS revenue
-    FROM vw_business_transactions
-    GROUP BY month
-)
-SELECT
-    month,
-    revenue,
-    LAG(revenue) OVER (ORDER BY month) AS previous_month_revenue,
-   ROUND(
-    ((revenue - LAG(revenue) OVER (ORDER BY month))
-	/ NULLIF(LAG(revenue) OVER (ORDER BY month), 0)
-    ) * 100, 2) AS growth_rate_pct
-FROM monthly_revenue
-ORDER BY month;
-
-
 -- =========================================================
 -- Revenue Driver Queries
 -- =========================================================
@@ -180,19 +249,3 @@ WHERE is_valid_product = TRUE
 GROUP BY product_description
 ORDER BY sales_revenue DESC
 LIMIT 10
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

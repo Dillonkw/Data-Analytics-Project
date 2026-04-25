@@ -9,7 +9,9 @@
 
 
 -- =========================================================
--- Core Monthly Growth KPI View
+-- Core Views
+-- =========================================================
+-- Monthly Growth KPI View
 -- =========================================================
 -- This is the base view for all trend, KPI, and comparison analysis.
 
@@ -20,8 +22,8 @@
 CREATE OR REPLACE VIEW vw_growth_metrics AS
 SELECT
     DATE_TRUNC('month', invoice_date)::date AS month_start,
-    EXTRACT(YEAR FROM invoice_date) AS year,
-    EXTRACT(MONTH FROM invoice_date) AS month_num,
+    EXTRACT(YEAR FROM invoice_date)::int AS year,
+    EXTRACT(MONTH FROM invoice_date)::int AS month_num,
     TO_CHAR(DATE_TRUNC('month', invoice_date), 'YYYY-MM') AS year_month,
 
     -- -----------------------------------------------------
@@ -55,54 +57,145 @@ GROUP BY
     EXTRACT(MONTH FROM invoice_date),
     TO_CHAR(DATE_TRUNC('month', invoice_date), 'YYYY-MM');
 
--- =========================================================
--- Base Monthly KPI Trend Table
--- =========================================================
+
+-- Yearly Summary
+CREATE OR REPLACE VIEW vw_growth_kpis AS
+WITH yearly_metrics AS (
+    SELECT
+        EXTRACT(YEAR FROM invoice_date)::int AS year,
+        SUM(revenue) AS total_revenue,
+        COUNT(DISTINCT invoice_number) AS total_orders,
+        COUNT(DISTINCT customer_id)
+            FILTER (WHERE customer_id IS NOT NULL) AS active_customers,
+        ROUND(
+            SUM(revenue) / NULLIF(COUNT(DISTINCT invoice_number), 0),
+            2
+        ) AS avg_order_value
+    FROM vw_business_transactions
+    WHERE invoice_date >= '2010-01-01'
+      AND invoice_date < '2012-01-01'
+    GROUP BY EXTRACT(YEAR FROM invoice_date)
+)
+SELECT
+    year,
+    total_revenue,
+    total_orders,
+    active_customers,
+    avg_order_value,
+    LAG(total_revenue) OVER (ORDER BY year) AS previous_year_revenue,
+    ROUND(100.0 * (
+            total_revenue - LAG(total_revenue) OVER (ORDER BY year)
+        ) / NULLIF(LAG(total_revenue) OVER (ORDER BY year), 0), 2
+    ) AS revenue_growth_pct,
+
+    LAG(total_orders) OVER (ORDER BY year) AS previous_year_orders,
+    ROUND(100.0 * (
+            total_orders - LAG(total_orders) OVER (ORDER BY year)
+        ) / NULLIF(LAG(total_orders) OVER (ORDER BY year), 0), 2
+    ) AS orders_growth_pct,
+
+    LAG(active_customers) OVER (ORDER BY year) AS previous_year_customers,
+    ROUND(100.0 * (
+            active_customers - LAG(active_customers) OVER (ORDER BY year)
+        ) / NULLIF(LAG(active_customers) OVER (ORDER BY year), 0), 2
+    ) AS customer_growth_pct,
+
+    LAG(avg_order_value) OVER (ORDER BY year) AS previous_year_aov,
+    ROUND(100.0 * (
+            avg_order_value - LAG(avg_order_value) OVER (ORDER BY year)
+        ) / NULLIF(LAG(avg_order_value) OVER (ORDER BY year), 0), 2
+    ) AS aov_growth_pct
+FROM yearly_metrics
+ORDER BY year;
+
+
+-- Monthly Presentation Layer
+CREATE OR REPLACE VIEW vw_growth_dashboard AS
+WITH base AS (
+    SELECT
+        month_start,
+        year::int,
+        month_num::int,
+        TO_CHAR(month_start, 'Mon') AS month_name,
+        year_month,
+        monthly_revenue,
+        total_orders,
+        active_customers,
+        avg_order_value
+    FROM vw_growth_metrics
+),
+with_growth AS (
+    SELECT
+        month_start,
+        year,
+        month_num,
+        month_name,
+        year_month,
+        monthly_revenue,
+        total_orders,
+        active_customers,
+        avg_order_value,
+
+        LAG(monthly_revenue) OVER (ORDER BY month_start) AS previous_month_revenue,
+        ROUND(100.0 * (
+                monthly_revenue - LAG(monthly_revenue) OVER (ORDER BY month_start)
+            ) / NULLIF(LAG(monthly_revenue) OVER (ORDER BY month_start), 0), 2
+        ) AS mom_revenue_growth_pct,
+
+        LAG(total_orders) OVER (ORDER BY month_start) AS previous_month_orders,
+        ROUND(100.0 * (
+                total_orders - LAG(total_orders) OVER (ORDER BY month_start)
+            ) / NULLIF(LAG(total_orders) OVER (ORDER BY month_start), 0), 2
+        ) AS mom_orders_growth_pct,
+
+        LAG(active_customers) OVER (ORDER BY month_start) AS previous_month_customers,
+        ROUND(100.0 * (
+                active_customers - LAG(active_customers) OVER (ORDER BY month_start)
+            ) / NULLIF(LAG(active_customers) OVER (ORDER BY month_start), 0), 2
+        ) AS mom_customers_growth_pct,
+
+        LAG(avg_order_value) OVER (ORDER BY month_start) AS previous_month_aov,
+        ROUND(100.0 * (
+                avg_order_value - LAG(avg_order_value) OVER (ORDER BY month_start)
+            ) / NULLIF(LAG(avg_order_value) OVER (ORDER BY month_start), 0), 2
+        ) AS mom_aov_growth_pct
+    FROM base
+)
 SELECT
     month_start,
+    year,
+    month_num,
+    month_name,
     year_month,
     monthly_revenue,
     total_orders,
-    units_sold,
-	units_per_order,
-	avg_selling_price,
     active_customers,
     avg_order_value,
-    revenue_per_customer
-FROM vw_growth_metrics
+    previous_month_revenue,
+    mom_revenue_growth_pct,
+    previous_month_orders,
+    mom_orders_growth_pct,
+    previous_month_customers,
+    mom_customers_growth_pct,
+    previous_month_aov,
+    mom_aov_growth_pct,
+
+    CASE WHEN year = 2010 THEN monthly_revenue END AS revenue_2010,
+    CASE WHEN year = 2011 THEN monthly_revenue END AS revenue_2011,
+
+    CASE WHEN year = 2010 THEN total_orders END AS orders_2010,
+    CASE WHEN year = 2011 THEN total_orders END AS orders_2011,
+
+    CASE WHEN year = 2010 THEN avg_order_value END AS aov_2010,
+    CASE WHEN year = 2011 THEN avg_order_value END AS aov_2011
+FROM with_growth
 ORDER BY month_start;
 
 
 -- =========================================================
--- Best Performing Months by Revenue
+-- Deep Dive Analysis Queries
 -- =========================================================
-SELECT
-    month_start,
-    year_month,
-    monthly_revenue,
-    total_orders,
-    active_customers,
-    avg_order_value
-FROM vw_growth_metrics
-ORDER BY monthly_revenue DESC
-LIMIT 5;
-
-
--- =========================================================
--- Lowest Performing Months by Revenue
--- =========================================================
-SELECT
-    month_start,
-    year_month,
-    monthly_revenue,
-    total_orders,
-    active_customers,
-    avg_order_value
-FROM vw_growth_metrics
-ORDER BY monthly_revenue ASC
-LIMIT 5;
-
-
+-
 -- =========================================================
 -- Month-Over-Month Growth
 -- =========================================================
@@ -112,9 +205,8 @@ SELECT
     year_month,
     monthly_revenue,
     LAG(monthly_revenue) OVER (ORDER BY month_start) AS previous_month_revenue,
-    ROUND(100.0 * 
-				(monthly_revenue - LAG(monthly_revenue) OVER (ORDER BY month_start)) / 
-				 NULLIF(LAG(monthly_revenue) OVER (ORDER BY month_start), 0), 2
+    ROUND(100.0 * (monthly_revenue - LAG(monthly_revenue) OVER (ORDER BY month_start)) / 
+				  NULLIF(LAG(monthly_revenue) OVER (ORDER BY month_start), 0), 2
     ) AS revenue_mom_growth_pct
 FROM vw_growth_metrics
 ORDER BY month_start;
@@ -148,20 +240,6 @@ FROM vw_growth_metrics
 ORDER BY month_start;
 
 
---Units Sold
-SELECT
-    month_start,
-    year_month,
-    units_sold,
-    LAG(units_sold) OVER (ORDER BY month_start) AS previous_month_units,
-    ROUND(100.0 * 
-				(units_sold - LAG(units_sold) OVER (ORDER BY month_start)) / 
-				NULLIF(LAG(units_sold) OVER (ORDER BY month_start), 0), 2
-    ) AS units_sold_mom_growth_pct
-FROM vw_growth_metrics
-ORDER BY month_start;
-
-
 -- Average Order Value 
 SELECT
     month_start,
@@ -189,8 +267,7 @@ SELECT
         100.0 * (
             SUM(CASE WHEN year = 2011 THEN monthly_revenue END)
             - SUM(CASE WHEN year = 2010 THEN monthly_revenue END)
-        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN monthly_revenue END), 0),
-        2
+        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN monthly_revenue END), 0), 2
     ) AS yoy_revenue_growth_pct
 FROM vw_growth_metrics
 GROUP BY month_num
@@ -207,8 +284,7 @@ SELECT
         100.0 * (
             SUM(CASE WHEN year = 2011 THEN total_orders END)
             - SUM(CASE WHEN year = 2010 THEN total_orders END)
-        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN total_orders END), 0),
-        2
+        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN total_orders END), 0), 2
     ) AS yoy_orders_growth_pct
 FROM vw_growth_metrics
 GROUP BY month_num
@@ -225,8 +301,7 @@ SELECT
         100.0 * (
             SUM(CASE WHEN year = 2011 THEN active_customers END)
             - SUM(CASE WHEN year = 2010 THEN active_customers END)
-        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN active_customers END), 0),
-        2
+        ) / NULLIF(SUM(CASE WHEN year = 2010 THEN active_customers END), 0), 2
     ) AS yoy_customer_growth_pct
 FROM vw_growth_metrics
 GROUP BY month_num
@@ -234,49 +309,10 @@ ORDER BY month_num;
 
 
 -- =========================================================
--- Cumulative Revenue Trend
--- =========================================================
-SELECT
-    month_start,
-    year_month,
-    monthly_revenue,
-    SUM(monthly_revenue) 
-	OVER (ORDER BY month_start
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cumulative_revenue
-FROM vw_growth_metrics
-ORDER BY month_start;
-
-
--- =========================================================
--- Quarterly Growth Summary
--- =========================================================
-SELECT
-    DATE_TRUNC('quarter', invoice_date)::date AS quarter_start,
-    TO_CHAR(DATE_TRUNC('quarter', invoice_date), 'YYYY') || '-Q' ||
-    EXTRACT(QUARTER FROM invoice_date) AS quarter_label,
-    SUM(revenue) AS quarterly_revenue,
-    COUNT(DISTINCT invoice_number) AS quarterly_orders,
-    SUM(quantity) AS quarterly_units_sold,
-    COUNT(DISTINCT customer_id)
-        FILTER (WHERE customer_id IS NOT NULL) AS quarterly_active_customers,
-    ROUND(SUM(revenue) / NULLIF(COUNT(DISTINCT invoice_number), 0), 2) AS quarterly_avg_order_value
-FROM vw_business_transactions
-WHERE invoice_date >= '2010-01-01'
-  AND invoice_date < '2012-01-01'
-GROUP BY
-    DATE_TRUNC('quarter', invoice_date),
-    TO_CHAR(DATE_TRUNC('quarter', invoice_date), 'YYYY') || '-Q' ||
-    EXTRACT(QUARTER FROM invoice_date)
-ORDER BY quarter_start;
-
-
--- =========================================================
 -- Annual KPI Summary (2010 vs 2011)
 -- =========================================================
 SELECT
     EXTRACT(YEAR FROM invoice_date) AS year,
-
     SUM(revenue) AS annual_revenue,
     COUNT(DISTINCT invoice_number) AS annual_orders,
     SUM(quantity) AS annual_units_sold,
@@ -328,22 +364,6 @@ WHERE invoice_date >= '2010-01-01'
   AND invoice_date < '2012-01-01';
 
 
--- Units Sold
-SELECT
-    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN quantity END) AS units_2010,
-    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN quantity END) AS units_2011,
-    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN quantity END) -
-    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN quantity END) AS units_change,
-    ROUND(100.0 * 
-            (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN quantity END) -
-            SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN quantity END)) / 
-			NULLIF(SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN quantity END), 0), 2
-    ) AS units_growth_pct
-FROM vw_business_transactions
-WHERE invoice_date >= '2010-01-01'
-  AND invoice_date < '2012-01-01';
-
-
 -- Active Customers
 SELECT
     COUNT(DISTINCT CASE
@@ -364,61 +384,64 @@ SELECT
         WHEN EXTRACT(YEAR FROM invoice_date) = 2010 AND customer_id IS NOT NULL
         THEN customer_id
     END) AS customers_change,
-
-    ROUND(100.0 * 
-            (COUNT(DISTINCT CASE
-                WHEN EXTRACT(YEAR FROM invoice_date) = 2011 AND customer_id IS NOT NULL
-                THEN customer_id
-            END) -
-            COUNT(DISTINCT CASE
-                WHEN EXTRACT(YEAR FROM invoice_date) = 2010 AND customer_id IS NOT NULL
-                THEN customer_id
-            END)
-        ) /
-        NULLIF(
-            COUNT(DISTINCT CASE
-                WHEN EXTRACT(YEAR FROM invoice_date) = 2010 AND customer_id IS NOT NULL
-                THEN customer_id
-            END), 0), 2
+    
+	ROUND(100.0 * (COUNT(DISTINCT CASE
+						WHEN EXTRACT(YEAR FROM invoice_date) = 2011 AND customer_id IS NOT NULL
+						THEN customer_id END) 
+					- COUNT(DISTINCT CASE
+							WHEN EXTRACT(YEAR FROM invoice_date) = 2010 AND customer_id IS NOT NULL
+							THEN customer_id END)) /
+						NULLIF(
+							COUNT(DISTINCT CASE
+							WHEN EXTRACT(YEAR FROM invoice_date) = 2010 AND customer_id IS NOT NULL
+							THEN customer_id END), 0), 2
     ) AS customers_growth_pct
 FROM vw_business_transactions
 WHERE invoice_date >= '2010-01-01'
   AND invoice_date < '2012-01-01';
 
 
-
 -- Average Order Value
 SELECT
     ROUND(
         SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
-        NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0), 2
+        NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0),
+        2
     ) AS aov_2010,
-
     ROUND(
         SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN revenue END) /
-        NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0), 2
+        NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0),
+        2
     ) AS aov_2011,
-
     ROUND(
-        (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN revenue END) /
-         NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0)
+        (
+            SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN revenue END) /
+            NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0)
         ) -
-        (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
-         NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0)
-        ), 2
+        (
+            SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
+            NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0)
+        ),
+        2
     ) AS aov_change,
-
-    ROUND(100.0 * (
-            (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN revenue END) /
-             NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0)
+    ROUND(
+        100.0 * (
+            (
+                SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN revenue END) /
+                NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2011 THEN invoice_number END), 0)
             ) -
-            (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
-            NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0))
-        ) /
-        NULLIF(
-            (SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
-             NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0)
-            ), 0),2
+            (
+                SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
+                NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0)
+            )
+        ) / NULLIF(
+            (
+                SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN revenue END) /
+                NULLIF(COUNT(DISTINCT CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2010 THEN invoice_number END), 0)
+            ),
+            0
+        ),
+        2
     ) AS aov_growth_pct
 FROM vw_business_transactions
 WHERE invoice_date >= '2010-01-01'
@@ -426,154 +449,79 @@ WHERE invoice_date >= '2010-01-01'
 
 
 -- =========================================================
--- Views for Dashboarding
+-- Segmented Growth Extensions
 -- =========================================================
--- KPI View
-CREATE OR REPLACE VIEW vw_growth_kpis AS
-WITH yearly_metrics AS (
+-- Bulk vs Regular Order Growth
+CREATE OR REPLACE VIEW vw_growth_order_type_monthly AS
+WITH order_monthly AS (
     SELECT
-        EXTRACT(YEAR FROM invoice_date)::int AS year,
-        SUM(revenue) AS total_revenue,
-        COUNT(DISTINCT invoice_number) AS total_orders,
-        COUNT(DISTINCT customer_id)
-            FILTER (WHERE customer_id IS NOT NULL) AS active_customers,
-        ROUND(
-            SUM(revenue) / NULLIF(COUNT(DISTINCT invoice_number), 0),
-            2
-        ) AS avg_order_value
+        DATE_TRUNC('month', invoice_date)::date AS month_start,
+        invoice_id,
+        SUM(quantity) AS total_quantity,
+        SUM(revenue) AS order_revenue
     FROM vw_business_transactions
     WHERE invoice_date >= '2010-01-01'
       AND invoice_date < '2012-01-01'
-    GROUP BY EXTRACT(YEAR FROM invoice_date)
-)
-SELECT
-    year,
-    total_revenue,
-    total_orders,
-    active_customers,
-    avg_order_value,
-
-    LAG(total_revenue) OVER (ORDER BY year) AS previous_year_revenue,
-    ROUND(
-        100.0 * (
-            total_revenue - LAG(total_revenue) OVER (ORDER BY year)
-        ) / NULLIF(LAG(total_revenue) OVER (ORDER BY year), 0),
-        2
-    ) AS revenue_growth_pct,
-
-    LAG(total_orders) OVER (ORDER BY year) AS previous_year_orders,
-    ROUND(
-        100.0 * (
-            total_orders - LAG(total_orders) OVER (ORDER BY year)
-        ) / NULLIF(LAG(total_orders) OVER (ORDER BY year), 0),
-        2
-    ) AS orders_growth_pct,
-
-    LAG(active_customers) OVER (ORDER BY year) AS previous_year_customers,
-    ROUND(
-        100.0 * (
-            active_customers - LAG(active_customers) OVER (ORDER BY year)
-        ) / NULLIF(LAG(active_customers) OVER (ORDER BY year), 0),
-        2
-    ) AS customer_growth_pct,
-
-    LAG(avg_order_value) OVER (ORDER BY year) AS previous_year_aov,
-    ROUND(
-        100.0 * (
-            avg_order_value - LAG(avg_order_value) OVER (ORDER BY year)
-        ) / NULLIF(LAG(avg_order_value) OVER (ORDER BY year), 0),
-        2
-    ) AS aov_growth_pct
-FROM yearly_metrics
-ORDER BY year;
-
-
--- Monthly Dashboard View
-CREATE OR REPLACE VIEW vw_growth_dashboard AS
-WITH base AS (
-    SELECT
-        month_start,
-        year::int,
-        month_num::int,
-        TO_CHAR(month_start, 'Mon') AS month_name,
-        year_month,
-        monthly_revenue,
-        total_orders,
-        active_customers,
-        avg_order_value
-    FROM vw_growth_metrics
-),
-with_growth AS (
-    SELECT
-        month_start,
-        year,
-        month_num,
-        month_name,
-        year_month,
-        monthly_revenue,
-        total_orders,
-        active_customers,
-        avg_order_value,
-
-        LAG(monthly_revenue) OVER (ORDER BY month_start) AS previous_month_revenue,
-        ROUND(
-            100.0 * (
-                monthly_revenue - LAG(monthly_revenue) OVER (ORDER BY month_start)
-            ) / NULLIF(LAG(monthly_revenue) OVER (ORDER BY month_start), 0),
-            2
-        ) AS mom_revenue_growth_pct,
-
-        LAG(total_orders) OVER (ORDER BY month_start) AS previous_month_orders,
-        ROUND(
-            100.0 * (
-                total_orders - LAG(total_orders) OVER (ORDER BY month_start)
-            ) / NULLIF(LAG(total_orders) OVER (ORDER BY month_start), 0),
-            2
-        ) AS mom_orders_growth_pct,
-
-        LAG(active_customers) OVER (ORDER BY month_start) AS previous_month_customers,
-        ROUND(
-            100.0 * (
-                active_customers - LAG(active_customers) OVER (ORDER BY month_start)
-            ) / NULLIF(LAG(active_customers) OVER (ORDER BY month_start), 0),
-            2
-        ) AS mom_customers_growth_pct,
-
-        LAG(avg_order_value) OVER (ORDER BY month_start) AS previous_month_aov,
-        ROUND(
-            100.0 * (
-                avg_order_value - LAG(avg_order_value) OVER (ORDER BY month_start)
-            ) / NULLIF(LAG(avg_order_value) OVER (ORDER BY month_start), 0),
-            2
-        ) AS mom_aov_growth_pct
-    FROM base
+    GROUP BY DATE_TRUNC('month', invoice_date), invoice_id
 )
 SELECT
     month_start,
-    year,
-    month_num,
-    month_name,
-    year_month,
-    monthly_revenue,
+    CASE
+        WHEN total_quantity >= 50 THEN 'Bulk Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    COUNT(*) AS total_orders,
+    SUM(order_revenue) AS monthly_revenue,
+    ROUND(AVG(order_revenue), 2) AS avg_order_value
+FROM order_monthly
+GROUP BY month_start, order_type
+ORDER BY month_start, order_type;
+
+
+SELECT
+    month_start,
+    order_type,
     total_orders,
-    active_customers,
-    avg_order_value,
-    previous_month_revenue,
-    mom_revenue_growth_pct,
-    previous_month_orders,
-    mom_orders_growth_pct,
-    previous_month_customers,
-    mom_customers_growth_pct,
-    previous_month_aov,
-    mom_aov_growth_pct,
+    monthly_revenue,
+    avg_order_value
+FROM vw_growth_order_type_monthly
+ORDER BY month_start, order_type;
 
-    CASE WHEN year = 2010 THEN monthly_revenue END AS revenue_2010,
-    CASE WHEN year = 2011 THEN monthly_revenue END AS revenue_2011,
 
-    CASE WHEN year = 2010 THEN total_orders END AS orders_2010,
-    CASE WHEN year = 2011 THEN total_orders END AS orders_2011,
+-- Known vs Unknown Customer Growth
+SELECT
+    DATE_TRUNC('month', invoice_date)::date AS month_start,
+    CASE
+        WHEN customer_id IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END AS customer_visibility,
+    SUM(revenue) AS monthly_revenue,
+    COUNT(DISTINCT invoice_id) AS total_orders
+FROM vw_business_transactions
+WHERE invoice_date >= '2010-01-01'
+  AND invoice_date < '2012-01-01'
+GROUP BY
+    DATE_TRUNC('month', invoice_date),
+    CASE
+        WHEN customer_id IS NULL THEN 'Unknown'
+        ELSE 'Known'
+    END
+ORDER BY month_start, customer_visibility;
 
-    CASE WHEN year = 2010 THEN avg_order_value END AS aov_2010,
-    CASE WHEN year = 2011 THEN avg_order_value END AS aov_2011
-FROM with_growth
-ORDER BY month_start;
+
+-- Wholesale vs Retail Customer Growth (Known Customers Only)
+SELECT
+    DATE_TRUNC('month', t.invoice_date)::date AS month_start,
+    c.customer_type,
+    SUM(t.revenue) AS monthly_revenue,
+    COUNT(DISTINCT t.invoice_id) AS total_orders,
+    COUNT(DISTINCT t.customer_id) AS active_customers
+FROM vw_customer_transactions t
+JOIN vw_customer_type c
+    ON t.customer_id = c.customer_id
+WHERE t.invoice_date >= '2010-01-01'
+  AND t.invoice_date < '2012-01-01'
+GROUP BY
+    DATE_TRUNC('month', t.invoice_date),
+    c.customer_type
+ORDER BY month_start, c.customer_type;

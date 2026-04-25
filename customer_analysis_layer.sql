@@ -45,6 +45,45 @@ WHERE is_cancelled = FALSE
 
 
 -- =========================================================
+-- Customer Type Classification View
+-- =========================================================
+CREATE OR REPLACE VIEW vw_customer_type AS
+WITH order_totals AS (
+    SELECT
+        customer_id,
+        invoice_id,
+        SUM(quantity) AS order_quantity,
+        SUM(revenue) AS order_revenue
+    FROM vw_customer_transactions
+    GROUP BY customer_id, invoice_id
+),
+customer_order_profile AS (
+    SELECT
+        customer_id,
+        COUNT(*) AS total_orders,
+        AVG(order_quantity) AS avg_order_quantity,
+        MAX(order_quantity) AS max_order_quantity,
+        AVG(order_revenue) AS avg_order_value,
+        SUM(CASE WHEN order_quantity >= 50 THEN 1 ELSE 0 END) AS bulk_orders
+    FROM order_totals
+    GROUP BY customer_id
+)
+SELECT
+    customer_id,
+    total_orders,
+    ROUND(avg_order_quantity, 2) AS avg_order_quantity,
+    max_order_quantity,
+    ROUND(avg_order_value, 2) AS avg_order_value,
+    bulk_orders,
+    ROUND(100.0 * bulk_orders / NULLIF(total_orders, 0), 2) AS pct_bulk_orders,
+    CASE
+        WHEN bulk_orders >= 2 THEN 'Wholesale'
+        WHEN avg_order_quantity >= 50 THEN 'Wholesale'
+        ELSE 'Retail'
+    END AS customer_type
+FROM customer_order_profile;
+
+-- =========================================================
 -- Customer Summary Table/View
 -- =========================================================
 CREATE OR REPLACE VIEW vw_customer_summary AS
@@ -62,11 +101,41 @@ GROUP BY customer_id;
 
 
 -- =========================================================
+-- Enhanced Customer Summary View
+-- =========================================================
+CREATE OR REPLACE VIEW vw_customer_summary_enhanced AS
+SELECT
+    s.customer_id,
+    t.customer_type,
+    t.total_orders AS classified_total_orders,
+    t.avg_order_quantity,
+    t.max_order_quantity,
+    t.bulk_orders,
+    t.pct_bulk_orders,
+    s.first_purchase_date,
+    s.last_purchase_date,
+    s.total_orders,
+    s.total_units,
+    s.total_revenue,
+    s.avg_transaction_revenue,
+    s.avg_order_value
+FROM vw_customer_summary s
+LEFT JOIN vw_customer_type t
+    ON s.customer_id = t.customer_id;
+
+
+-- =========================================================
 -- Core Customer KPI Queries
 -- =========================================================
 -- Total Known Customers
 SELECT
 	COUNT(*) AS total_known_customers
+FROM vw_customer_summary;
+
+
+-- Total Know Customer Revenue
+SELECT
+    SUM(total_revenue) AS total_customer_revenue
 FROM vw_customer_summary;
 
 
@@ -88,10 +157,52 @@ SELECT
 FROM vw_customer_summary;
 
 
--- Average Customer Lifetime Value
+-- =========================================================
+-- Customer Type Comparison Queries
+-- =========================================================
+-- Customer Count by Type
 SELECT
-	AVG(total_revenue) AS customer_lifetime_value
-FROM vw_customer_summary;
+    customer_type,
+    COUNT(*) AS customer_count,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_customers
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type
+ORDER BY customer_count DESC;
+
+
+-- Revenue by Type
+SELECT
+    customer_type,
+    COUNT(*) AS customer_count,
+    SUM(total_revenue) AS total_revenue,
+    ROUND(AVG(total_revenue), 2) AS avg_revenue_per_customer,
+    ROUND(100.0 * SUM(total_revenue) / SUM(SUM(total_revenue)) OVER (), 2) AS pct_of_total_revenue
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type
+ORDER BY total_revenue DESC;
+
+
+-- Orders and Units by Type
+SELECT
+    customer_type,
+    ROUND(AVG(total_orders), 2) AS avg_orders_per_customer,
+    ROUND(AVG(total_units), 2) AS avg_units_per_customer,
+    ROUND(AVG(avg_order_value), 2) AS avg_order_value
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type
+ORDER BY avg_order_value DESC;
+
+
+-- Customer Lifetime Value
+SELECT
+    customer_type,
+    COUNT(*) AS customer_count,
+    ROUND(AVG(total_revenue), 2) AS avg_clv,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_revenue) AS median_clv,
+    MAX(total_revenue) AS max_clv
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type
+ORDER BY avg_clv DESC;
 
 
 -- =========================================================
@@ -160,6 +271,25 @@ FROM ranked_customers
 WHERE revenue_decile = 1;
 
 
+-- Top 10% of Customers Distribution by Customer Type
+WITH ranked_customers AS (
+    SELECT
+        customer_id,
+        customer_type,
+        total_revenue,
+        NTILE(10) OVER (ORDER BY total_revenue DESC) AS revenue_decile
+    FROM vw_customer_summary_enhanced
+)
+SELECT
+    customer_type,
+    COUNT(*) AS customers,
+    SUM(total_revenue) AS total_revenue
+FROM ranked_customers
+WHERE revenue_decile = 1
+GROUP BY customer_type
+ORDER BY total_revenue DESC;
+
+
 -- =========================================================
 -- Customer Distribution Analysis
 -- =========================================================
@@ -192,6 +322,39 @@ SELECT
 FROM vw_customer_summary
 GROUP BY order_bucket
 ORDER BY customer_count DESC;
+
+
+-- Revenue buckets by Customer Type
+SELECT
+    customer_type,
+    CASE
+        WHEN total_revenue < 100 THEN 'Under 100'
+        WHEN total_revenue < 500 THEN '100-499'
+        WHEN total_revenue < 1000 THEN '500-999'
+        WHEN total_revenue < 5000 THEN '1,000-4,999'
+        ELSE '5,000+'
+    END AS revenue_bucket,
+    COUNT(*) AS customer_count,
+    SUM(total_revenue) AS bucket_revenue
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type, revenue_bucket
+ORDER BY customer_type, bucket_revenue DESC;
+
+
+-- Order Frequency by Customer Type
+SELECT
+    customer_type,
+    CASE
+        WHEN total_orders = 1 THEN '1 order'
+        WHEN total_orders BETWEEN 2 AND 3 THEN '2-3 orders'
+        WHEN total_orders BETWEEN 4 AND 5 THEN '4-5 orders'
+        WHEN total_orders BETWEEN 6 AND 10 THEN '6-10 orders'
+        ELSE '11+ orders'
+    END AS order_bucket,
+    COUNT(*) AS customer_count
+FROM vw_customer_summary_enhanced
+GROUP BY customer_type, order_bucket
+ORDER BY customer_type, customer_count DESC;
 
 
 -- =========================================================
@@ -262,20 +425,3 @@ FROM vw_customer_transactions
 GROUP BY country
 ORDER BY customer_count DESC
 LIMIT 10;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
