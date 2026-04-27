@@ -20,7 +20,7 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 ## Dashboard Preview
 
 ### Executive Overview
-![Executive Overview](04_dashboard_images/executive_overview.png)
+![Executive Overview](04_dashboard_images/executive_business_overview.png)
 
 ### Growth Analysis
 ![Growth Analysis](04_dashboard_images/growth_analysis.png)
