@@ -51,10 +51,9 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 
 python → data cleaning and preprocessing scripts  
 sql → SQL queries and analytical views  
-dashboard → Power BI file
-dashboard_images → preview of dashboards
+dashboard → Power BI file  
+dashboard_images → preview of dashboards  
 report → final business report (PDF)  
-images → dashboard screenshots  
 
 ## Full Report
 [Download the Full Business Report](report/ecommerce_customer_analytics_report.pdf)
