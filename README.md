@@ -19,9 +19,16 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 
 ## Dashboard Preview
 
+### Executive Overview
 ![Executive Overview](dashboard_images/executive_overview.png)
+
+### Growth Analysis
 ![Growth Analysis](dashboard_images/growth_analysis.png)
+
+### Customer Analysis
 ![Customer Analysis](dashboard_images/customer_analysis.png)
+
+### RFM Segmentation
 ![RFM Segmentation](dashboard_images/rfm_segmentation.png)
 
 ## Key Insights
