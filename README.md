@@ -37,7 +37,7 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 - Increase marketing efforts during peak seasonal months (September–November) to maximize revenue  
 - Focus on driving order volume through bundling, cross-selling, and bulk incentives  
 - Prioritize retention of high-value customers through personalized offers and loyalty programs  
-- Launch targeted campaigns to re-engage at-risk customers and reduce churn
+- Launch targeted campaigns to re-engage "At Risk" customers and reduce churn
 
 ## Project Workflow
 
