@@ -1,5 +1,6 @@
 # E-commerce Customer Analytics: Revenue Insights and Segmentation Strategy
 
+## Project Overview  
 This project analyzes over 1 million transactional records from a UK-based e-commerce retailer between December 2009 and December 2011 to evaluate business performance, identify key revenue drivers, and uncover customer segmentation and retention opportunities.
 
 Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, customer behavior, and growth patterns. The analysis transforms transactional data into actionable insights that support revenue growth and customer retention strategies.
@@ -56,11 +57,11 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 
 ## Repository Structure
 
-python → data cleaning and preprocessing scripts  
-sql → SQL queries and analytical views  
-dashboard → Power BI file  
-dashboard_images → preview of dashboards  
-report → final business report (PDF)  
+01_python → data cleaning and preprocessing scripts  
+02_sql → SQL queries and analytical views  
+03_dashboard → Power BI file  
+04_dashboard_images → preview of dashboards  
+05_report → final business report (PDF)  
 
 ## Full Report
 [Download the Full Business Report](https://github.com/Dillonkw/ecommerce-customer-analytics/blob/main/05_report/ecommerce_revenue_customer_segmentation_report.pdf)
