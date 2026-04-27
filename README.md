@@ -1,2 +1,2 @@
-# E-commerce Revenue & Customer Segmentation: Insights & Growth Strategy
+# E-commerce Customer Analytics: Revenue Insights and Segmentation Strategy
 
