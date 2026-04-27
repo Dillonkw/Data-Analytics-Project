@@ -63,7 +63,7 @@ dashboard_images → preview of dashboards
 report → final business report (PDF)  
 
 ## Full Report
-[Download the Full Business Report](05_report/ecommerce_customer_analytics_report.pdf)
+[Download the Full Business Report](report/ecommerce_customer_analytics_report.pdf?raw=true)
 
 
 
