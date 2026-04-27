@@ -20,16 +20,16 @@ Using Python, PostgreSQL, and Power BI, the analysis explores revenue trends, cu
 ## Dashboard Preview
 
 ### Executive Overview
-![Executive Overview](dashboard_images/executive_overview.png)
+![Executive Overview](04_dashboard_images/executive_overview.png)
 
 ### Growth Analysis
-![Growth Analysis](dashboard_images/growth_analysis.png)
+![Growth Analysis](04_dashboard_images/growth_analysis.png)
 
 ### Customer Analysis
-![Customer Analysis](dashboard_images/customer_analysis.png)
+![Customer Analysis](04_dashboard_images/customer_analysis.png)
 
 ### RFM Segmentation
-![RFM Segmentation](dashboard_images/rfm_segmentation.png)
+![RFM Segmentation](04_dashboard_images/rfm_segmentation.png)
 
 ## Key Insights
 
@@ -63,7 +63,7 @@ dashboard_images → preview of dashboards
 report → final business report (PDF)  
 
 ## Full Report
-[Download the Full Business Report](report/ecommerce_customer_analytics_report.pdf)
+[Download the Full Business Report](05_report/ecommerce_customer_analytics_report.pdf)
 
 
 
